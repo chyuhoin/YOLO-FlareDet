@@ -1943,3 +1943,192 @@ class SAVPE(nn.Module):
         aggregated = score.transpose(-2, -3) @ x.reshape(B, self.c, C // self.c, -1).transpose(-1, -2)
 
         return F.normalize(aggregated.transpose(-2, -3).reshape(B, Q, -1), dim=-1, p=2)
+
+
+class SE(nn.Module):
+    """Squeeze-and-Excitation (SE) block."""
+
+    def __init__(self, c1, r=16):
+        """Initializes SE block with squeeze and excitation layers for channel-wise attention."""
+        super().__init__()
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.fc1 = nn.Conv2d(c1, c1 // r, 1, 1)
+        self.fc2 = nn.Conv2d(c1 // r, c1, 1, 1)
+        self.act = nn.SiLU()
+
+    def forward(self, x):
+        """Forward pass through SE layer."""
+        x1 = self.pool(x)
+        x1 = self.act(self.fc1(x1))
+        x2 = torch.sigmoid(self.fc2(x1))
+        return x * x2
+
+class MANet(nn.Module):
+
+    def __init__(self, c1, c2, n=1, shortcut=False, p=1, kernel_size=3, g=1, e=0.5):
+        super().__init__()
+        self.c = int(c2 * e)
+        self.cv_first = Conv(c1, 2 * self.c, 1, 1)
+        self.cv_final = Conv((4 + n) * self.c, c2, 1)
+        self.m = nn.ModuleList(Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=0.5) for _ in range(n))
+        self.cv_block_1 = Conv(2 * self.c, self.c, 1, 1)
+        dim_hid = int(p * 2 * self.c)
+        self.cv_block_2 = nn.Sequential(Conv(2 * self.c, dim_hid, 1, 1), DWConv(dim_hid, dim_hid, kernel_size, 1),
+                                      Conv(dim_hid, self.c, 1, 1))
+
+    def forward(self, x):
+        y = self.cv_first(x)
+        y0 = self.cv_block_1(y)
+        y1 = self.cv_block_2(y)
+        y2, y3 = y.chunk(2, 1)
+        y = list((y0, y1, y2, y3))
+        y.extend(m(y[-1]) for m in self.m)
+
+        return self.cv_final(torch.cat(y, 1))
+
+class MessageAgg(nn.Module):
+    def __init__(self, agg_method="mean"):
+        super().__init__()
+        self.agg_method = agg_method
+
+    def forward(self, X, path):
+        """
+            X: [n_node, dim]
+            path: col(source) -> row(target)
+        """
+        X = torch.matmul(path, X)
+        if self.agg_method == "mean":
+            norm_out = 1 / torch.sum(path, dim=2, keepdim=True)
+            norm_out[torch.isinf(norm_out)] = 0
+            X = norm_out * X
+            return X
+        elif self.agg_method == "sum":
+            pass
+        return X
+
+
+class HyPConv(nn.Module):
+    def __init__(self, c1, c2):
+        super().__init__()
+        self.fc = nn.Linear(c1, c2)
+        self.v2e = MessageAgg(agg_method="mean")
+        self.e2v = MessageAgg(agg_method="mean")
+
+
+    def forward(self, x, H):
+        x = self.fc(x)
+        # v -> e
+        E = self.v2e(x, H.transpose(1, 2).contiguous())
+        # e -> v
+        x = self.e2v(E, H)
+
+        return x
+
+
+class HyperComputeModule(nn.Module):
+    def __init__(self, c1, c2, threshold):
+        super().__init__()
+        self.threshold = threshold
+        self.hgconv = HyPConv(c1, c2)
+        self.bn = nn.BatchNorm2d(c2)
+        self.act = nn.SiLU()
+
+
+    def forward(self, x):
+        b, c, h, w = x.shape[0], x.shape[1], x.shape[2], x.shape[3]
+        x = x.view(b, c, -1).transpose(1, 2).contiguous()
+        feature = x.clone()
+        distance = torch.cdist(feature, feature)
+        hg = distance < self.threshold
+        hg = hg.float().to(x.device).to(x.dtype)
+        x = self.hgconv(x, hg).to(x.device).to(x.dtype) + x
+        x = x.transpose(1, 2).contiguous().view(b, c, h, w)
+        x = self.act(self.bn(x))
+
+        return x
+
+class AdaFreqAttention(nn.Module):
+    """
+    计算一个可学习的频率基函数，对每个通道做投影，作为通道注意力的描述子。
+    """
+
+    def __init__(self,
+                 channels: int,
+                 reduction: int = 16,
+                 use_abs: bool = True):
+        """
+        Args:
+            channels: 特征图通道数 C
+            reduction: MLP 的 reduction ratio，和 SE 一样
+            use_abs: 是否对 DCT 系数取绝对值，作为“强度”
+        """
+        super().__init__()
+        self.channels = channels
+        self.reduction = max(1, reduction)
+        self.use_abs = use_abs
+
+        hidden = max(1, channels // self.reduction)
+        self.fc = nn.Sequential(
+            nn.Linear(2*channels, hidden, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden, channels, bias=False),
+            nn.Sigmoid()
+        )
+
+        self.u = nn.Parameter(torch.tensor(1.0))  # 初始化成一个偏小的标量
+        self.v = nn.Parameter(torch.tensor(1.0))  # 主要是为了稳定训练，避免从高频开始
+
+    def _build_dct_basis(self, h, w, device, dtype):
+        """
+        构造 size = (1, 1, H, W) 的 2D DCT-II 正交基函数
+        这里我们让 u0, v0 可学习
+        """
+        u0 = self.u.clamp(0, h * 2)
+        v0 = self.v.clamp(0, w * 2)
+
+        # print(f"Adaptive DCT basis frequencies: u0={u0.item():.4f}, v0={v0.item():.4f} for size ({h}, {w})")
+
+        i = torch.arange(h, device=device, dtype=dtype).view(h, 1)  # (H, 1)
+        j = torch.arange(w, device=device, dtype=dtype).view(1, w)  # (1, W)
+
+        # 正交归一化系数
+        alpha_u = torch.tensor(math.sqrt(2.0 / h), device=device)
+        alpha_v = torch.tensor(math.sqrt(2.0 / w), device=device)
+
+        phi_u = torch.cos(math.pi * (2 * i + 1) * u0 / (2.0 * h))  # (H, 1)
+        phi_v = torch.cos(math.pi * (2 * j + 1) * v0 / (2.0 * w))  # (1, W)
+
+        basis_2d = alpha_u * alpha_v * (phi_u @ phi_v)  # (H, W)
+
+        basis = basis_2d.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
+
+        return basis
+
+    def forward(self, x):
+        """
+        x: (B, C, H, W)
+        """
+        b, c, h, w = x.shape
+
+        gap = x.mean(dim=(2, 3)) # (B, C)
+        # DCT 基函数
+        basis = self._build_dct_basis(h, w, x.device, x.dtype)  # (1, 1, H, W)
+
+        # 投影：对每个通道做 <x_c, basis>
+        # 广播到 (B, C, H, W) 后逐点相乘再求和
+        proj = (x * basis).sum(dim=(-1, -2))  # (B, C)
+
+        if self.use_abs:
+            proj = proj.abs()  # 用“强度”，避免正负相互抵消
+        
+        # print(f"Freq projection stats: mean={proj.mean().item():.4f}, std={proj.std().item():.4f}")
+
+        # proj = proj / (h * w)  # 如果启用这个归一化，性能会下降非常非常非常多！！！！！我不知道是什么原理
+
+        # 先来一个拼接，就像是残差连接那样，保证性能至少不会低于SE
+        y = torch.cat([gap, proj], dim=1) # (B, 2C)
+        weight = self.fc(y)         # (B, C)
+        weight = weight.view(b, c, 1, 1)    # (B, C, 1, 1)
+
+        # 作用在原始特征图上
+        return x * weight

@@ -59,6 +59,10 @@ from .block import (
     ResNetLayer,
     SCDown,
     TorchVision,
+    SE, # 新增SE块
+    MANet, # 新增TPAMI论文中的模块
+    HyperComputeModule, # 新增超图模块
+    AdaFreqAttention, # 新增自适应频域注意力机制
 )
 from .conv import (
     CBAM,
@@ -179,4 +183,8 @@ __all__ = (
     "YOLOEDetect",
     "YOLOESegment",
     "v10Detect",
+    "SE", # 新增SE块
+    "MANet", # 新增TPAMI论文中的模块
+    "HyperComputeModule", # 新增超图模块
+    "AdaFreqAttention", # 新增自适应频域注意力机制
 )

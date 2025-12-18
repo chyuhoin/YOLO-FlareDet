@@ -68,6 +68,10 @@ from ultralytics.nn.modules import (
     YOLOEDetect,
     YOLOESegment,
     v10Detect,
+    SE, # 新增SE块
+    MANet, # 新增TPAMI论文中的模块
+    HyperComputeModule, # 新增超图模块
+    AdaFreqAttention, # 新增自适应频域注意力机制
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -1553,6 +1557,7 @@ def parse_model(d, ch, verbose=True):
             SCDown,
             C2fCIB,
             A2C2f,
+            MANet, # 新增
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
@@ -1572,6 +1577,7 @@ def parse_model(d, ch, verbose=True):
             C2fCIB,
             C2PSA,
             A2C2f,
+            MANet, # 新增
         }
     )
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
@@ -1639,10 +1645,17 @@ def parse_model(d, ch, verbose=True):
             args = [c1, c2, *args[1:]]
         elif m is CBFuse:
             c2 = ch[f[-1]]
+        elif m in {SE, AdaFreqAttention}: # 新增的模块不改变通道数
+            c2 = ch[f]
+            args = [ch[f], *args[1:]]
         elif m in frozenset({TorchVision, Index}):
             c2 = args[0]
             c1 = ch[f]
             args = [*args[1:]]
+        elif m is HyperComputeModule:
+            c1, c2 = ch[f], args[0]
+            c2 = make_divisible(min(c2, max_channels) * width, 8)
+            args = [c1, c2, 8]
         else:
             c2 = ch[f]
 
