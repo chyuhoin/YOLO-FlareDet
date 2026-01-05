@@ -1,4 +1,4 @@
-# Full-Disk Solar Flare Detection based on CHASE Hα Observations
+# Physics-Informed Deep Learning for Automated Solar Flare Detection in CHASE Hα Observations
 
 This repository contains the official implementation of the paper: **"Physics-Informed Deep Learning for Automated Solar Flare Detection in CHASE Hα Observations"**.
 
