@@ -1,15 +1,15 @@
-# 基于 CHASE H$\alpha$ 观测的全日面太阳耀斑探测
+# 基于 CHASE Hα 观测的全日面太阳耀斑探测
 
-本仓库是论文 **"Full-Disk Solar Flare Detection Based on Frequency-Guided Attention and Physics-Aware Dimensionality Reduction"** 的官方实现。
+本仓库是论文 **"Physics-Informed Deep Learning for Automated Solar Flare Detection in CHASE Hα Observations"** 的官方实现。
 
-该框架将太阳物理诊断（H$\alpha$ 谱线轮廓）与定制化的 YOLO11 架构相结合，实现了高精度、准实时的太阳耀斑探测。
+该框架将太阳物理诊断（Hα 谱线轮廓）与定制化的 YOLO11 架构相结合，实现了高精度、准实时的太阳耀斑探测。
 
 ## 🚀 项目架构
 
 本项目基于 [Ultralytics](https://github.com/ultralytics/ultralytics) 框架进行深度定制开发：
 
 * `/ultralytics`: 修改后的 YOLO 核心源码，支持多通道“物理感知”输入及频率引导注意力机制（Frequency-Guided Attention）。
-* `gs_batch.py`: 物理感知降维（高斯拟合）脚本。用于将 118 通道的 H$\alpha$ 光谱数据压缩为 3 通道的物理参数图（线心强度、多普勒速度、半全宽）。
+* `gs_batch.py`: 物理感知降维（高斯拟合）脚本。用于将 118 通道的 Hα 光谱数据压缩为 3 通道的物理参数图（线心强度、多普勒速度、半全宽）。
 
 ## 📊 数据集说明
 

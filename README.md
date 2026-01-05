@@ -1,15 +1,15 @@
-# Full-Disk Solar Flare Detection based on CHASE H$\alpha$ Observations
+# Full-Disk Solar Flare Detection based on CHASE Hα Observations
 
-This repository contains the official implementation of the paper: **"Full-Disk Solar Flare Detection Based on Frequency-Guided Attention and Physics-Aware Dimensionality Reduction"**.
+This repository contains the official implementation of the paper: **"Physics-Informed Deep Learning for Automated Solar Flare Detection in CHASE Hα Observations"**.
 
-Our framework integrates solar physics diagnostics (H$\alpha$ line profiles) with a customized YOLO11 architecture to achieve high-accuracy, real-time solar flare detection.
+Our framework integrates solar physics diagnostics (Hα line profiles) with a customized YOLO11 architecture to achieve high-accuracy, real-time solar flare detection.
 
 ## 🚀 Project Architecture
 
 This project is built upon a modified version of the [Ultralytics](https://github.com/ultralytics/ultralytics) framework.
 
 * `/ultralytics`: The core YOLO source code, modified to support multi-channel "physics-aware" inputs and Frequency-Guided Attention.
-* `gs_batch.py`: Script for Physics-Aware Dimensionality Reduction (Gaussian Fitting). It compresses 118-channel H$\alpha$ spectral data into 3-channel physical parameter maps (I_{core}, V_{dop}, FWHM).
+* `gs_batch.py`: Script for Physics-Aware Dimensionality Reduction (Gaussian Fitting). It compresses 118-channel Hα spectral data into 3-channel physical parameter maps (I_{core}, V_{dop}, FWHM).
 
 ## 📊 Dataset
 
